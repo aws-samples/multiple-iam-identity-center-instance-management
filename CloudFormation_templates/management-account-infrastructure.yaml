@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates resources needed for this solution in the management account.
+Parameters:
+  CrossAccountRoleName:
+    Type: String
+    Default: "idc-lambda-service-role"
+    Description: "The lambda function will assume this role in every member account of your organization"
+  LambdaDeploymentPackageBucket:
+    Type: String
+
+Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: 
+        !Join ['-',['idc-report-', !Select [2,!Split ['/', !Ref AWS::StackId]]]]
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+         AssumeRolePolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Principal:
+                  Service:
+                    - lambda.amazonaws.com
+                Action:
+                  - 'sts:AssumeRole'
+         Policies:
+            - PolicyName: 'idcLambdaPolicy'
+              PolicyDocument:
+                Version: "2012-10-17"
+                Statement:
+                  - Sid: IdCReadOnly
+                    Effect: Allow
+                    Action:
+                      - "iam:ListPolicies"
+                      - "organizations:DescribeOrganization"
+                      - "organizations:DescribeAccount"
+                      - "organizations:ListParents"
+                      - "organizations:ListChildren"
+                      - "organizations:ListAccounts"
+                      - "organizations:ListRoots"
+                      - "organizations:ListAccountsForParent"
+                      - "organizations:ListOrganizationalUnitsForParent"
+                      - "organizations:ListDelegatedAdministrators"
+                      - "sso:Describe*"
+                      - "sso:Get*"
+                      - "sso:List*"
+                      - "sso:Search*"
+                      - "sso-directory:DescribeDirectory"
+                      - "access-analyzer:ValidatePolicy"
+                      - "identitystore:ListUsers"
+                    Resource: "*"
+                  - Sid: CrossAccountAssumeRole
+                    Effect: Allow
+                    Action: "sts:AssumeRole"
+                    Resource: !Join
+                    - ''
+                    - -  'arn:aws:iam::*:role/'
+                      -  !Ref CrossAccountRoleName
+                  - Sid: SendReportToS3
+                    Effect: Allow
+                    Action: 's3:PutObject'
+                    Resource:
+                      - !GetAtt S3Bucket.Arn
+                      - !Sub ${S3Bucket.Arn}/*
+  GetIdCDetailsLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+         Code:
+            S3Bucket: !Ref LambdaDeploymentPackageBucket
+            S3Key: IdC_deployment_package.zip
+         PackageType: Zip
+         FunctionName: 'GetIdCDetailsLambda'
+         Handler: lambda_function.lambda_handler
+         Role: !GetAtt LambdaRole.Arn 
+         Runtime: python3.10
+         Timeout: 15
+         Environment:
+          Variables:
+            reports_bucket: !Ref S3Bucket
+            CurrentAccountId: !Sub ${AWS::AccountId}
+            CrossAccountRoleName: !Ref CrossAccountRoleName
+  SchedulerRole:
+      Type: AWS::IAM::Role
+      Properties:
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            Effect: Allow
+            Principal:
+              Service: !Sub scheduler.${AWS::URLSuffix}
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Sub ${AWS::AccountId}
+        Policies:
+          - PolicyName: StartExecutionPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action: states:StartExecution
+                  Resource: !GetAtt GetIdCDetailsLambda.Arn
+  SchedulerEveryDay:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+          FlexibleTimeWindow:
+              Mode: 'OFF'
+          ScheduleExpression: cron(0 0 * * ? *) 
+          Target:
+              Arn: !GetAtt GetIdCDetailsLambda.Arn
+              RoleArn: !GetAtt SchedulerRole.Arn
+Outputs:
+  BucketName:
+    Value: !Ref S3Bucket
+    Description: Name of the Amazon S3 bucket where the reports are sent to
+  FunctionName:
+    Value: !Ref GetIdCDetailsLambda
+    Description: Name of the Lambda function

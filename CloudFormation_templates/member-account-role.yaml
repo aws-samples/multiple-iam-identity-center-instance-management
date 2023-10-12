@@ -1,0 +1,37 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Creates the AWS Lambda cross account role, this template needs to be deployed in every member account
+Parameters:
+  ManagementAccountId:
+    Type: String
+    Description: The AWS Organizations management account, or delegated admin account this role will trust.
+
+Resources:
+  LambdaCrossAccountServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: idc-lambda-service-role
+      Policies:
+        - PolicyName: 'idc-lambda-policy'
+          PolicyDocument: 
+            Version: '2012-10-17'
+            Statement:
+              - Sid: AllowAccessToIdentityStore
+                Effect: Allow
+                Action: identitystore:ListUsers
+                Resource: '*'
+              - Sid: AllowAccessToSsoList
+                Effect: Allow
+                Action: 
+                  - sso:ListInstances
+                  - sso:ListApplications
+                Resource: '*'
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          Effect: Allow
+          Principal:
+            AWS:
+              - Fn::Sub: 'arn:aws:iam::${ManagementAccountId}:root'
+          Action:
+              - 'sts:AssumeRole'
+
