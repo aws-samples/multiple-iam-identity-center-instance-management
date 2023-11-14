@@ -64,6 +64,18 @@ Resources:
                     Resource:
                       - !GetAtt S3Bucket.Arn
                       - !Sub ${S3Bucket.Arn}/*
+                   - Sid: IdCCreateLogGroup
+                    Effect: Allow
+                    Action:
+                      - 'logs:CreateLogGroup'
+                    Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+                    
+                  - Sid: IdCCreateLogStream
+                    Effect: Allow
+                    Action:
+                      - 'logs:CreateLogStream'
+                      - 'logs:PutLogEvents'
+                    Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:GetIdCDetailsLambda:*"
   GetIdCDetailsLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -100,7 +112,9 @@ Resources:
               Version: '2012-10-17'
               Statement:
                 - Effect: Allow
-                  Action: states:StartExecution
+                  Action: 
+                    - 'states:StartExecution'
+                    - 'lambda:InvokeFunction'
                   Resource: !GetAtt GetIdCDetailsLambda.Arn
   SchedulerEveryDay:
     Type: AWS::Scheduler::Schedule
