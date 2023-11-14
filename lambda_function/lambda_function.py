@@ -121,7 +121,7 @@ def csv_to_S3(logsDic, path):
     now = datetime.datetime.now()
     LambdaTemp= '/tmp/summary_file.csv'
     
-    if path == 'idc_instances':
+    if path == 'identity_center_instances':
         prefix = 'sample/' + str(now) + '_idc_instances_'+'summary_file.csv'
         fields = ['accountId', 'IdentityCenterInstance', 'Identity Store Arn']
     elif path == 'duplicated_users':
@@ -153,7 +153,7 @@ def construct_summary(application_assignment, accounts_and_instances_dict, dupli
     csv_to_S3(duplicated_users_summary, 'duplicated_users')
     for item in accounts_and_instances_dict:
         identity_center_instances_summary.append({'accountId':item, 'IdentityCenterInstance':accounts_and_instances_dict[item][0], 'Identity Store Arn':accounts_and_instances_dict[item][1]})
-    csv_to_S3(duplicated_users_summary, 'duplicated_users')
+    csv_to_S3(identity_center_instances_summary, 'identity_center_instances')
     for item in application_assignment:
         application_assignment_summary.append({'Name':item['Name'], 'Application ARN':item['Application ARN'],'Users':item['Users']})
     csv_to_S3(application_assignment_summary, 'application_assignment')
