@@ -9,7 +9,7 @@ Multiple account instances of AWS IAM Identity Center can now be deployed in you
 3.	**Application assignments on local instances:** a report with the users assigned to each application
 
 ## Solution Overview
-![alt diagram](/image/RepoDiagram.png)
+![alt diagram](/RepoDiagram.png)
 
 
 
