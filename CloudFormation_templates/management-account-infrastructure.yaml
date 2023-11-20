@@ -75,7 +75,7 @@ Resources:
                     Action:
                       - 'logs:CreateLogStream'
                       - 'logs:PutLogEvents'
-                    Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:GetIdCDetailsLambda:*"
+                    Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
   GetIdCDetailsLambda:
     Type: AWS::Lambda::Function
     Properties:
@@ -86,7 +86,7 @@ Resources:
          FunctionName: 'GetIdCDetailsLambda'
          Handler: lambda_function.lambda_handler
          Role: !GetAtt LambdaRole.Arn 
-         Runtime: python3.10
+         Runtime: python3.11
          Timeout: 15
          Environment:
           Variables:
