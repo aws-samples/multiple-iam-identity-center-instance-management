@@ -26,7 +26,7 @@ Once you deploy the solution, the AWS Lambda will do the following:
 ## How to use this solution?
 
 Scripts and templates are available in the repository. Use them how is more comfortable for you. The suggested procedure is to deploy this script in an AWS Lambda in the account where your IAM Identity Center is managed or in the account assigned as a [Delegated administrator for AWS Organizations](https://docs.aws.amazon.com/organizations/latest/userguide/orgs_delegate_policies.html). 
-To successfully deploy this solution you will need a AWS Lambda deployment package, an S3 bucket to upload the package, and an IAM role that can be assumed by Lambda in each member account. 
+To successfully deploy this solution you will need a AWS Lambda deployment package, an S3 bucket to upload the package, and an IAM role that can be assumed by Lambda in each member account. For ease of deployment in us-east-1 region, , the lambda package is uploaded to an S3 bucket and configured in the cloudFormation Template. If you wish to deploy this in another region, please upload the lambda package to a bucket of your choice in your region and update the S3Bucket and S3Key properties in the cloudFormation Template.
 
 
 Follow the steps to get started:
