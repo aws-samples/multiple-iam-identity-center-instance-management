@@ -5,7 +5,7 @@ Multiple account instances of AWS IAM Identity Center can now be deployed in you
 
 
 1.	**Account instances summary:** a report with the accounts and IAM Identity Center instances deployed in each of them.
-2.	**User duplication:** a report of all duplicated users and the IAM iIdentity Center instances they belong to. A duplicated user is one that appears in more than one IAM Identity Center instance. Email compares users.
+2.	**User duplication:** a report of all duplicated users and the IAM Identity Center instances they belong to. A duplicated user is one that appears in more than one IAM Identity Center instance. Email compares users.
 3.	**Application assignments on local instances:** a report with the users assigned to each application
 
 ## Solution Overview
