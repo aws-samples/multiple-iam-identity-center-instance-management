@@ -1,4 +1,4 @@
-# Multiple Instance Management Iam Identity Center
+# Multiple Instance Management IAM Identity Center
 
 
 Multiple account instances of AWS IAM Identity Center can now be deployed in your AWS organization to support authentication for AWS managed applications, such as Amazon Redshift. This solution generates reports to provide visibility into users across multiple IAM Identity Center instances deployed in your AWS organizations. The solution comprises of a script that generates information to help you manage multiple IAM Identity Center instances. The python script will provide you with the following reports:
