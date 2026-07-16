@@ -1,0 +1,337 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Identity Center Vanity Domain - Phase 1: Single Region Redirect.
+  Creates a Route 53 hosted zone, NS delegation, ACM certificate,
+  VPC (optional), ALB with HTTP/HTTPS 302 redirect listeners,
+  regional DNS records, and latency-based routing for a single region.
+
+Parameters:
+  TLD:
+    Type: String
+    Description: Your top-level domain (e.g. mycompany.com)
+  TLDHostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Route 53 hosted zone ID for your TLD
+  IdentityCenterSubdomain:
+    Type: String
+    Default: aws
+    Description: Subdomain prefix (e.g. "aws" creates aws.mycompany.com)
+  IdentityCenterInstanceId:
+    Type: String
+    Description: Your Identity Center instance ID (e.g. ssoins-72238f444baccc75)
+  VpcId:
+    Type: String
+    Default: ''
+    Description: (Optional) Existing VPC ID. Leave empty to create a new VPC.
+  SubnetIds:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: (Optional) Comma-separated public subnet IDs. Leave empty to create new subnets.
+  SecurityGroupId:
+    Type: String
+    Default: ''
+    Description: (Optional) Existing security group ID. Leave empty to create one.
+
+Conditions:
+  CreateVpc: !Equals [!Ref VpcId, '']
+  CreateSecurityGroup: !Equals [!Ref SecurityGroupId, '']
+
+Resources:
+
+  # ============================================================
+  # Route 53 Hosted Zone & NS Delegation
+  # ============================================================
+
+  GlobalHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: !Sub "${IdentityCenterSubdomain}.${TLD}"
+      HostedZoneConfig:
+        Comment: !Sub "Global Identity Center endpoint zone for ${IdentityCenterSubdomain}.${TLD}"
+
+  NSDelegationRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref TLDHostedZoneId
+      Name: !Sub "${IdentityCenterSubdomain}.${TLD}"
+      Type: NS
+      TTL: '172800'
+      ResourceRecords: !GetAtt GlobalHostedZone.NameServers
+
+  # ============================================================
+  # ACM Certificate
+  # ============================================================
+
+  Certificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub "${IdentityCenterSubdomain}.${TLD}"
+      SubjectAlternativeNames:
+        - !Sub "${AWS::Region}.${IdentityCenterSubdomain}.${TLD}"
+      ValidationMethod: DNS
+      KeyAlgorithm: RSA_2048
+      DomainValidationOptions:
+        - DomainName: !Sub "${IdentityCenterSubdomain}.${TLD}"
+          HostedZoneId: !Ref GlobalHostedZone
+        - DomainName: !Sub "${AWS::Region}.${IdentityCenterSubdomain}.${TLD}"
+          HostedZoneId: !Ref GlobalHostedZone
+
+  # ============================================================
+  # VPC Resources (created only when VpcId is not provided)
+  # ============================================================
+
+  Vpc:
+    Type: AWS::EC2::VPC
+    Condition: CreateVpc
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub "idc-vanity-${AWS::Region}"
+
+  VpcIpv6Cidr:
+    Type: AWS::EC2::VPCCidrBlock
+    Condition: CreateVpc
+    Properties:
+      VpcId: !Ref Vpc
+      AmazonProvidedIpv6CidrBlock: true
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Condition: CreateVpc
+
+  VpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Condition: CreateVpc
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Condition: CreateVpc
+    Properties:
+      VpcId: !Ref Vpc
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    Condition: CreateVpc
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicRouteIpv6:
+    Type: AWS::EC2::Route
+    Condition: CreateVpc
+    DependsOn: VpcGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationIpv6CidrBlock: '::/0'
+      GatewayId: !Ref InternetGateway
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Condition: CreateVpc
+    DependsOn: VpcIpv6Cidr
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.0.0/26
+      Ipv6CidrBlock: !Select [0, !Cidr [!Select [0, !GetAtt Vpc.Ipv6CidrBlocks], 4, 64]]
+      AvailabilityZone: !Select [0, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        - Key: Name
+          Value: !Sub "idc-vanity-${AWS::Region}-a"
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Condition: CreateVpc
+    DependsOn: VpcIpv6Cidr
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.0.0.64/26
+      Ipv6CidrBlock: !Select [1, !Cidr [!Select [0, !GetAtt Vpc.Ipv6CidrBlocks], 4, 64]]
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      AssignIpv6AddressOnCreation: true
+      Tags:
+        - Key: Name
+          Value: !Sub "idc-vanity-${AWS::Region}-b"
+
+  SubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateVpc
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref PublicRouteTable
+
+  SubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: CreateVpc
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref PublicRouteTable
+
+  # ============================================================
+  # Security Group (created only when SecurityGroupId is not provided)
+  # ============================================================
+
+  AlbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Condition: CreateSecurityGroup
+    Properties:
+      GroupName: !Sub "idc-vanity-alb-sg-${AWS::Region}"
+      GroupDescription: !Sub "Identity Center vanity domain ALB - allows HTTP/HTTPS inbound (${AWS::Region})"
+      VpcId: !If [CreateVpc, !Ref Vpc, !Ref VpcId]
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIpv6: '::/0'
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIpv6: '::/0'
+
+  # ============================================================
+  # Application Load Balancer
+  # ============================================================
+
+  LoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Sub "idc-vanity-alb-${AWS::Region}"
+      Type: application
+      Scheme: internet-facing
+      IpAddressType: dualstack
+      SecurityGroups:
+        - !If [CreateSecurityGroup, !Ref AlbSecurityGroup, !Ref SecurityGroupId]
+      Subnets: !If
+        - CreateVpc
+        - - !Ref SubnetA
+          - !Ref SubnetB
+        - !Ref SubnetIds
+      LoadBalancerAttributes:
+        - Key: deletion_protection.enabled
+          Value: 'false'
+
+  HttpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTP
+      Port: 80
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            Host: !Sub "${IdentityCenterInstanceId}.portal.${AWS::Region}.app.aws"
+            Path: "/#{path}"
+            Query: "#{query}"
+            StatusCode: HTTP_302
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancer
+      Protocol: HTTPS
+      Port: 443
+      SslPolicy: ELBSecurityPolicy-TLS13-1-2-Res-FIPS-PQ-2025-09
+      Certificates:
+        - CertificateArn: !Ref Certificate
+      DefaultActions:
+        - Type: redirect
+          RedirectConfig:
+            Protocol: HTTPS
+            Port: '443'
+            Host: !Sub "${IdentityCenterInstanceId}.portal.${AWS::Region}.app.aws"
+            Path: "/#{path}"
+            Query: "#{query}"
+            StatusCode: HTTP_302
+
+  # ============================================================
+  # DNS Records
+  # ============================================================
+
+  RegionalARecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref GlobalHostedZone
+      Name: !Sub "${AWS::Region}.${IdentityCenterSubdomain}.${TLD}"
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        EvaluateTargetHealth: true
+
+  RegionalAAAARecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref GlobalHostedZone
+      Name: !Sub "${AWS::Region}.${IdentityCenterSubdomain}.${TLD}"
+      Type: AAAA
+      AliasTarget:
+        DNSName: !GetAtt LoadBalancer.DNSName
+        HostedZoneId: !GetAtt LoadBalancer.CanonicalHostedZoneID
+        EvaluateTargetHealth: true
+
+  LatencyARecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref GlobalHostedZone
+      Name: !Sub "${IdentityCenterSubdomain}.${TLD}"
+      Type: A
+      Region: !Ref 'AWS::Region'
+      SetIdentifier: !Sub "${AWS::Region}--ipv4"
+      AliasTarget:
+        DNSName: !Sub "${AWS::Region}.${IdentityCenterSubdomain}.${TLD}"
+        HostedZoneId: !Ref GlobalHostedZone
+        EvaluateTargetHealth: true
+
+  LatencyAAAARecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref GlobalHostedZone
+      Name: !Sub "${IdentityCenterSubdomain}.${TLD}"
+      Type: AAAA
+      Region: !Ref 'AWS::Region'
+      SetIdentifier: !Sub "${AWS::Region}--ipv6"
+      AliasTarget:
+        DNSName: !Sub "${AWS::Region}.${IdentityCenterSubdomain}.${TLD}"
+        HostedZoneId: !Ref GlobalHostedZone
+        EvaluateTargetHealth: true
+
+Outputs:
+  GlobalHostedZoneId:
+    Description: Hosted zone ID for the global vanity domain
+    Value: !Ref GlobalHostedZone
+    Export:
+      Name: !Sub "${AWS::StackName}-GlobalHostedZoneId"
+  GlobalDomainName:
+    Description: The global vanity domain name
+    Value: !Sub "${IdentityCenterSubdomain}.${TLD}"
+    Export:
+      Name: !Sub "${AWS::StackName}-GlobalDomainName"
+  LoadBalancerArn:
+    Description: ALB ARN
+    Value: !Ref LoadBalancer
+  LoadBalancerDnsName:
+    Description: ALB DNS name
+    Value: !GetAtt LoadBalancer.DNSName
+  RegionalEndpoint:
+    Description: Regional vanity domain endpoint
+    Value: !Sub "${AWS::Region}.${IdentityCenterSubdomain}.${TLD}"
