@@ -8,7 +8,7 @@ This solution deploys a custom vanity domain (e.g., `aws.mycompany.com`) that se
 
 ## Architecture
 
-![Regional routing architecture for IAM Identity Center vanity domains](regional-routing/architecture.png)
+![Regional routing architecture for IAM Identity Center vanity domains](architecture.png)
 
 
 **Components:**
@@ -158,7 +158,6 @@ The CLI resolves the vanity domain to determine the Regional Identity Center end
 
 ## Things to Know
 
--  Use 302 (Found) status codes, not 301. A 301 causes browsers to cache the redirect, preventing failovers from working until the cache expires.
 - The vanity domain does not appear in the browser's address bar — users are redirected to the Regional access portal URL.
 - DNS propagation for NS delegation can take up to 48 hours, though it typically completes within minutes for Route 53-to-Route 53 delegation.
 - ALB listeners use **302 (Found)** redirects, not 301. Using 301 causes browsers to cache the redirect and breaks failover.
@@ -172,7 +171,7 @@ The CLI resolves the vanity domain to determine the Regional Identity Center end
 
 ## Security
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+See [CONTRIBUTING](../CONTRIBUTING.md#security-issue-notifications) for more information.
 
 ## License
 

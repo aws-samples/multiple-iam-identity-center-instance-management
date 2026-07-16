@@ -21,7 +21,7 @@ The python script will provide you with the following reports:
 - 	**Application assignments on local instances:** The users assigned to each application
 
 ## Solution overview
-![alt diagram](/RepoDiagram.png)
+![alt diagram](RepoDiagram.png)
 
 The solution deploys an AWS Lambda function in your management or delegated administrator account that runs on a scheduled basis, assumes a cross-account role into each member account, and aggregates Identity Center instance and user data into reports stored in Amazon S3. The following steps describe the Lambda execution flow:
 
@@ -67,7 +67,7 @@ For this solution to work correctly, the Lambda execution role and the cross-acc
 
 ## Security
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+See [CONTRIBUTING](../CONTRIBUTING.md#security-issue-notifications) for more information.
 
 ## License
 
