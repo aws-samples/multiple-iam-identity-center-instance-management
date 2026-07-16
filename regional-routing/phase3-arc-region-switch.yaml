@@ -1,0 +1,255 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  Identity Center Vanity Domain - ARC Region Switch for Manual Failover.
+  Creates an ARC Region Switch plan with Route 53 health check workflows
+  for manual regional failover. Optionally creates the IAM execution role.
+  NOTE: ARC Region Switch plans support exactly 2 regions (Region1 + Region2).
+
+Parameters:
+  GlobalHostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Hosted zone ID from Phase 1 stack outputs (GlobalHostedZoneId)
+  GlobalDomainName:
+    Type: String
+    Description: Global vanity domain from Phase 1 stack outputs (e.g. aws.mycompany.com)
+  Region1:
+    Type: String
+    Default: us-east-2
+    Description: Primary region (typically your PRIMARY_REGION)
+  Region2:
+    Type: String
+    Default: us-west-2
+    Description: >
+      Failover region. NOTE: ARC Region Switch plans support exactly 2 regions.
+      This is the only failover region supported.
+  ArcExecutionRoleArn:
+    Type: String
+    Default: ''
+    Description: >
+      (Optional) ARN of an existing IAM role for ARC Region Switch.
+      Leave empty to create one automatically.
+
+Conditions:
+  CreateRole: !Equals [!Ref ArcExecutionRoleArn, '']
+
+Resources:
+
+  # --- IAM Execution Role (created only when ArcExecutionRoleArn is not provided) ---
+  ArcExecutionRole:
+    Type: AWS::IAM::Role
+    Condition: CreateRole
+    Properties:
+      RoleName: ARCRegionSwitch-IdentityCenter-ExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: arc-region-switch.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonApplicationRecoveryControllerRegionSwitchPlanExecutionPolicy
+      Policies:
+        - PolicyName: Route53AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - route53:ListResourceRecordSets
+                Resource: !Sub "arn:aws:route53:::hostedzone/${GlobalHostedZoneId}"
+
+  # --- ARC Region Switch Plan ---
+  RegionSwitchPlan:
+    Type: AWS::ARCRegionSwitch::Plan
+    Properties:
+      Name: idc-vanity-failover-plan
+      Description: Manual failover plan for Identity Center vanity domain routing
+      RecoveryApproach: activeActive
+      RecoveryTimeObjectiveMinutes: 1
+      Regions:
+        - !Ref Region1
+        - !Ref Region2
+      ExecutionRole: !If
+        - CreateRole
+        - !GetAtt ArcExecutionRole.Arn
+        - !Ref ArcExecutionRoleArn
+      Workflows:
+        - WorkflowTargetAction: activate
+          Steps:
+            - Name: ActivateRoute53RecordSet
+              Description: Activate Route 53 latency-based records for the target region
+              ExecutionBlockType: Route53HealthCheck
+              ExecutionBlockConfiguration:
+                Route53HealthCheckConfig:
+                  TimeoutMinutes: 5
+                  HostedZoneId: !Ref GlobalHostedZoneId
+                  RecordName: !Ref GlobalDomainName
+                  RecordSets:
+                    - RecordSetIdentifier: !Sub "${Region1}--ipv4"
+                      Region: !Ref Region1
+                    - RecordSetIdentifier: !Sub "${Region1}--ipv6"
+                      Region: !Ref Region1
+                    - RecordSetIdentifier: !Sub "${Region2}--ipv4"
+                      Region: !Ref Region2
+                    - RecordSetIdentifier: !Sub "${Region2}--ipv6"
+                      Region: !Ref Region2
+        - WorkflowTargetAction: deactivate
+          Steps:
+            - Name: DeactivateRoute53RecordSet
+              Description: Deactivate Route 53 latency-based records for the target region
+              ExecutionBlockType: Route53HealthCheck
+              ExecutionBlockConfiguration:
+                Route53HealthCheckConfig:
+                  TimeoutMinutes: 5
+                  HostedZoneId: !Ref GlobalHostedZoneId
+                  RecordName: !Ref GlobalDomainName
+                  RecordSets:
+                    - RecordSetIdentifier: !Sub "${Region1}--ipv4"
+                      Region: !Ref Region1
+                    - RecordSetIdentifier: !Sub "${Region1}--ipv6"
+                      Region: !Ref Region1
+                    - RecordSetIdentifier: !Sub "${Region2}--ipv4"
+                      Region: !Ref Region2
+                    - RecordSetIdentifier: !Sub "${Region2}--ipv6"
+                      Region: !Ref Region2
+
+  # --- Lambda Role for Health Check Association ---
+  HealthCheckAssociationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: ArcAndRoute53Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - arc-region-switch:ListRoute53HealthChecks
+                  - arc-region-switch:ListRoute53HealthChecksInRegion
+                  - arc-region-switch:GetPlan
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - route53:ChangeResourceRecordSets
+                  - route53:ListResourceRecordSets
+                Resource: !Sub "arn:${AWS::Partition}:route53:::hostedzone/${GlobalHostedZoneId}"
+
+  HealthCheckAssociationFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-hc-association"
+      Runtime: python3.12
+      Handler: index.handler
+      Timeout: 120
+      Role: !GetAtt HealthCheckAssociationRole.Arn
+      Code:
+        ZipFile: |
+          import boto3, json, time
+          from urllib.request import Request, urlopen
+
+          PHYSICAL_ID = 'AssociateHealthChecks'
+
+          def send(event, context, status, data):
+              body = json.dumps({
+                  'Status': status,
+                  'Reason': f"See logs in {context.log_stream_name}",
+                  'PhysicalResourceId': PHYSICAL_ID,
+                  'StackId': event['StackId'],
+                  'RequestId': event['RequestId'],
+                  'LogicalResourceId': event['LogicalResourceId'],
+                  'NoEcho': False,
+                  'Data': data
+              }).encode()
+              urlopen(Request(event['ResponseURL'], data=body, headers={'Content-Type': ''}, method='PUT'))
+
+          def handler(event, context):
+              print(json.dumps(event))
+              if event['RequestType'] == 'Delete':
+                  send(event, context, 'SUCCESS', {})
+                  return
+              try:
+                  props = event['ResourceProperties']
+                  plan_arn = props['PlanArn']
+                  zone_id = props['HostedZoneId']
+                  name = props['RecordName']
+                  arc = boto3.client('arc-region-switch')
+                  r53 = boto3.client('route53')
+
+                  hcs = []
+                  for i in range(12):
+                      hcs = arc.list_route53_health_checks(arn=plan_arn, hostedZoneId=zone_id, recordName=name).get('healthChecks', [])
+                      if hcs:
+                          break
+                      print(f"Waiting for health checks ({i+1}/12)...")
+                      time.sleep(10)
+                  if not hcs:
+                      raise Exception('No health checks found after 2 minutes')
+
+                  # Only consider regions explicitly passed in — ignore any stale records in the hosted zone
+                  allowed_regions = set(r for r in props.get('Regions', []) if r)
+                  hc_map = {h['region']: h['healthCheckId'] for h in hcs if h.get('region') and h.get('healthCheckId') and h['region'] in allowed_regions}
+                  print(f"Health checks (filtered to {allowed_regions}): {json.dumps(hc_map)}")
+
+                  records = r53.list_resource_record_sets(HostedZoneId=zone_id, StartRecordName=name, StartRecordType='A')['ResourceRecordSets']
+                  changes = []
+                  for rrs in records:
+                      if rrs.get('Name', '').rstrip('.') != name.rstrip('.'):
+                          continue
+                      sid = rrs.get('SetIdentifier', '')
+                      if '--' not in sid:
+                          continue
+                      region = sid.rsplit('--', 1)[0]
+                      if region in allowed_regions and region in hc_map:
+                          rrs['HealthCheckId'] = hc_map[region]
+                          changes.append({'Action': 'UPSERT', 'ResourceRecordSet': rrs})
+
+                  if changes:
+                      print(f"Associating health checks with {len(changes)} records")
+                      r53.change_resource_record_sets(HostedZoneId=zone_id, ChangeBatch={'Changes': changes})
+
+                  details = '; '.join(f"{c['ResourceRecordSet']['SetIdentifier']} -> {c['ResourceRecordSet']['HealthCheckId']}" for c in changes)
+                  send(event, context, 'SUCCESS', {'Count': str(len(changes)), 'Details': details})
+              except Exception as e:
+                  print(f"Error: {e}")
+                  send(event, context, 'FAILED', {'Error': str(e)})
+
+  AssociateHealthChecks:
+    Type: Custom::AssociateHealthChecks
+    DependsOn: RegionSwitchPlan
+    Properties:
+      ServiceToken: !GetAtt HealthCheckAssociationFunction.Arn
+      ServiceTimeout: 180
+      PlanArn: !GetAtt RegionSwitchPlan.Arn
+      HostedZoneId: !Ref GlobalHostedZoneId
+      RecordName: !Ref GlobalDomainName
+      FunctionVersion: "4"
+      Regions:
+        - !Ref Region1
+        - !Ref Region2
+
+Outputs:
+  ArcPlanArn:
+    Description: ARC Region Switch plan ARN (use this for failover commands)
+    Value: !GetAtt RegionSwitchPlan.Arn
+  ExecutionRoleArn:
+    Description: IAM execution role ARN used by ARC Region Switch
+    Value: !If
+      - CreateRole
+      - !GetAtt ArcExecutionRole.Arn
+      - !Ref ArcExecutionRoleArn
+  HealthCheckRecordCount:
+    Description: Number of Route 53 records updated with ARC health checks
+    Value: !GetAtt AssociateHealthChecks.Count
+  HealthCheckDetails:
+    Description: "Route 53 records updated with health check IDs (format: SetIdentifier -> HealthCheckId)"
+    Value: !GetAtt AssociateHealthChecks.Details
