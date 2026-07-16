@@ -1,6 +1,6 @@
 # Regional Routing with Custom Vanity Domains for IAM Identity Center
 
-This solution deploys a custom vanity domain (e.g., `aws.mycompany.com`) that serves as a single, memorable entry point for IAM Identity Center access portals across multiple AWS Regions. It uses latency-based routing to automatically redirect users to their nearest healthy access portal endpoint and provides automated failover when a Region is impaired.
+This solution deploys a custom vanity domain (e.g., `aws.mycompany.com`) that serves as a single, memorable entry point for IAM Identity Center access portals across multiple AWS Regions. It uses latency-based routing to automatically redirect users to their nearest healthy access portal endpoint and provides failover when a Region is impaired.
 
 > **Full walkthrough:** For detailed step-by-step instructions including console-based deployment, 
 > see the [accompanying blog post](https://aws.amazon.com/blogs/security/regional-routing-for-aws-access-portals-implementing-custom-vanity-domains-for-iam-identity-center/).
@@ -49,24 +49,45 @@ Download and deploy each CloudFormation template individually:
 
 ```bash
 # Phase 1 – Single-Region redirect
+# Required: TLD, TLDHostedZoneId, IdentityCenterInstanceId
+# Optional: IdentityCenterSubdomain (default: aws), VpcId, SubnetIds, SecurityGroupId
 aws cloudformation create-stack \
   --stack-name idc-vanity-phase1 \
   --template-body file://phase1-single-region-redirect.yaml \
-  --parameters ParameterKey=VanityDomain,ParameterValue=aws.mycompany.com ...
+  --parameters \
+    ParameterKey=TLD,ParameterValue=mycompany.com \
+    ParameterKey=TLDHostedZoneId,ParameterValue=Z0123456789EXAMPLE \
+    ParameterKey=IdentityCenterSubdomain,ParameterValue=aws \
+    ParameterKey=IdentityCenterInstanceId,ParameterValue=ssoins-1234567890
 ```
+
 ```bash
 # Phase 2 – Multi-Region latency (deploy in each additional Region)
+# Required: IdentityCenterInstanceId, GlobalHostedZoneId, GlobalDomainName (from Phase 1 outputs)
+# Optional: VpcId, SubnetIds, SecurityGroupId
 aws cloudformation create-stack \
   --stack-name idc-vanity-phase2 \
   --template-body file://phase2-multi-region-latency.yaml \
-  --parameters ...
+  --region us-west-2 \
+  --parameters \
+    ParameterKey=IdentityCenterInstanceId,ParameterValue=ssoins-1234567890 \
+    ParameterKey=GlobalHostedZoneId,ParameterValue=ZXXXXXXXXXXXXXXX \
+    ParameterKey=GlobalDomainName,ParameterValue=aws.mycompany.com
 ```
+
 ```bash
 # Phase 3 – ARC Region switch failover
+# Required: GlobalHostedZoneId, GlobalDomainName (from Phase 1 outputs), Region1, Region2
+# Optional: ArcExecutionRoleArn (auto-created if omitted)
 aws cloudformation create-stack \
   --stack-name idc-vanity-phase3 \
   --template-body file://phase3-arc-region-switch.yaml \
-  --parameters ...
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameters \
+    ParameterKey=GlobalHostedZoneId,ParameterValue=ZXXXXXXXXXXXXXXX \
+    ParameterKey=GlobalDomainName,ParameterValue=aws.mycompany.com \
+    ParameterKey=Region1,ParameterValue=us-east-2 \
+    ParameterKey=Region2,ParameterValue=us-west-2
 ```
 
 ### Option 2: Deploy all phases with a single script
