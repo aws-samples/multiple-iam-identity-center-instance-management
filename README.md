@@ -1,6 +1,6 @@
 # Managing Multiple IAM Identity Center Instances
 
-This repository provides solutions for organizations operating multiple IAM Identity Center instances, whether account-level instances across member accounts, or organization instances replicated across multiple AWS Regions.
+This repository provides solutions for organizations managing IAM Identity Center at scale — whether operating multiple instances across member accounts, routing users across Regions, or extending workforce account access beyond Identity Center permission sets.
 
 ## Solutions
 
@@ -19,6 +19,12 @@ Provides CloudFormation templates to deploy a custom vanity domain (e.g., aws.my
     Phase 3: ARC Region Switch for managed failover
 
 → [View solution](regional-routing/README.md)
+
+3. AWS CLI Integration for IAM Account Access Manager
+
+Provides Python scripts that let your workforce use the AWS CLI with roles assigned through IAM Account Access Manager — the account access portal that assigns IAM roles to users across accounts while IAM Identity Center manages the login session. The scripts configure named CLI profiles with automatic credential refresh, so `aws` commands work normally until the Identity Center session expires, the same way `aws sso login` already works for permission sets.
+
+→ [View solution](IAM-account-access-cli/README.md)
 
 ## Security
 
