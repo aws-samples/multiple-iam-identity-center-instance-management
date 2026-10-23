@@ -22,7 +22,7 @@ Provides CloudFormation templates to deploy a custom vanity domain (e.g., aws.my
 
 3. 🆕 **AWS CLI Integration for IAM Account Access Manager**
 
-Provides Python scripts that let your workforce use the AWS CLI with roles assigned through IAM Account Access Manager — the account access portal that assigns IAM roles to users across accounts while IAM Identity Center manages the login session. The scripts configure named CLI profiles with automatic credential refresh, so `aws` commands work normally until the Identity Center session expires, the same way `aws sso login` already works for permission sets.
+Provides Python scripts that let your workforce use the AWS CLI with roles assigned through [IAM Account access manager](https://docs.aws.amazon.com/IAM/latest/UserGuide/account-access-manager.html), a feature of AWS IAM that assigns your existing IAM roles to users across accounts while IAM Identity Center manages the login session. The scripts configure named CLI profiles with automatic credential refresh, so `aws` commands work normally until the Identity Center session expires, the same way `aws sso login` already works for permission sets.
 
 → [View solution](IAM-account-access-cli/README.md)
 
